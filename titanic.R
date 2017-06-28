@@ -43,11 +43,17 @@ data$FsizeD[data$Fsize > 4] <- 'large'
 data$isAlone <- 0
 data[data$Fsize == 1,"isAlone"] <- 1
 
+data$Child[data$Age < 18] <- 1
+data$Child[data$Age >= 18] <- 0
+
+data$Mother <- 0
+data$Mother[data$Sex == 'female' & data$Parch > 0 & data$Age > 18 & data$Title != 'Miss'] <- 1
+
 
 data$Deck <- factor(sapply(data$Cabin, function(x) unlist(strsplit(x, NULL)[[1]][1])))
 
 data <- data[,-c("Ticket","Name","Surname", "Cabin", "Deck")]
-ohe_feats = c('Pclass', "Sex",'SibSp' ,'Parch', 'Embarked', 'Title', 'FsizeD', 'isAlone','Fsize')
+ohe_feats = c('Sex', 'Embarked', 'Title', 'FsizeD')
 
 
 for (f in ohe_feats){
@@ -82,17 +88,17 @@ gc()
 
 # Params for xgboost
 param <- list(booster = "gbtree",
-              eval_metric = "error", 
+              eval_metric = "auc", 
               objective = "binary:logistic",
-              eta = .1,
+              eta = .11,
               gamma = 1,
-              max_depth = 4,
+              max_depth = 6,
               min_child_weight = 1,
               subsample = .7,
               colsample_bytree = .7)
 
 
-rounds = 52
+rounds = 72
 mpreds = data.table(id=test_ids)
 
 for(random.seed.num in 1:10) {
@@ -113,6 +119,25 @@ for(random.seed.num in 1:10) {
 mpreds_2 = mpreds[, id:= NULL]
 mpreds_2 = mpreds_2[, y := rowMeans(.SD)]
 
+mpreds_2[mpreds_2$y <= 0.5,"x"] <- 0
+mpreds_2[mpreds_2$y > 0.5,"x"] <- 1
 
-submission = data.table(ID=test_ids, y=mpreds_2$y)
+
+submission = data.table(PassengerId=test_ids, Survived=mpreds_2$x)
 write.table(submission, "titanic_xgboost.csv", sep=",", dec=".", quote=FALSE, row.names=FALSE)
+
+
+
+library(randomForest)
+fit <- randomForest(as.factor(y_train) ~ .,
+                    data=train, 
+                    importance=TRUE,
+                    do.trace=50, 
+                    ntree=200)
+
+pred_test <- predict(fit, test)
+
+submission_rf = data.table(PassengerId=test_ids, Survived=pred_test)
+write.table(submission_rf, "titanic_rf.csv", sep=",", dec=".", quote=FALSE, row.names=FALSE)
+
+
